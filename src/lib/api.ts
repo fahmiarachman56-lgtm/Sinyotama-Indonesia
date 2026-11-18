@@ -5,6 +5,7 @@ import type {
   Product,
   ProductPart,
 } from '../types.ts';
+import { browserStore } from './browserStore.ts';
 
 const TOKEN_STORAGE_KEY = 'joranstock_admin_token';
 
@@ -18,6 +19,29 @@ export function setAdminToken(token: string | null) {
   } else {
     sessionStorage.removeItem(TOKEN_STORAGE_KEY);
   }
+}
+
+let backendModePromise: Promise<'server' | 'browser'> | null = null;
+
+async function isServerBackend(): Promise<boolean> {
+  if (!backendModePromise) {
+    backendModePromise = (async () => {
+      try {
+        const res = await fetch('/api/health', { cache: 'no-store' });
+        const contentType = res.headers.get('content-type') || '';
+        if (res.ok && contentType.includes('application/json')) {
+          const data = await res.json().catch(() => null);
+          if (data && data.ok === true) {
+            return 'server';
+          }
+        }
+      } catch {
+        // Static hosting (e.g. Vercel without backend/Supabase)
+      }
+      return 'browser';
+    })();
+  }
+  return (await backendModePromise) === 'server';
 }
 
 async function request<T>(url: string, options: RequestInit = {}): Promise<T> {
@@ -45,53 +69,66 @@ async function request<T>(url: string, options: RequestInit = {}): Promise<T> {
 }
 
 export const api = {
-  checkAdminSession(): Promise<{ isAdmin: boolean }> {
-    return request('/api/auth/session');
+  async checkAdminSession(): Promise<{ isAdmin: boolean }> {
+    if (await isServerBackend()) {
+      return request('/api/auth/session');
+    }
+    return { isAdmin: browserStore.checkLocalAdminToken(getAdminToken()) };
   },
 
   async verifyPin(pin: string): Promise<{ token: string; expiresAt: number }> {
-    const res = await request<{ token: string; expiresAt: number }>(
-      '/api/auth/verify-pin',
-      {
-        method: 'POST',
-        body: JSON.stringify({ pin }),
-      },
-    );
+    const res = (await isServerBackend())
+      ? await request<{ token: string; expiresAt: number }>('/api/auth/verify-pin', {
+          method: 'POST',
+          body: JSON.stringify({ pin }),
+        })
+      : await browserStore.verifyPin(pin);
     setAdminToken(res.token);
     return res;
   },
 
   async logoutAdmin(): Promise<void> {
     try {
-      await request('/api/auth/logout', { method: 'POST' });
+      if (await isServerBackend()) {
+        await request('/api/auth/logout', { method: 'POST' });
+      }
     } finally {
       setAdminToken(null);
     }
   },
 
-  changePin(currentPin: string, newPin: string): Promise<{ ok: boolean }> {
-    return request('/api/auth/change-pin', {
-      method: 'POST',
-      body: JSON.stringify({ currentPin, newPin }),
-    });
+  async changePin(currentPin: string, newPin: string): Promise<{ ok: boolean }> {
+    if (await isServerBackend()) {
+      return request('/api/auth/change-pin', {
+        method: 'POST',
+        body: JSON.stringify({ currentPin, newPin }),
+      });
+    }
+    return browserStore.changePin(currentPin, newPin);
   },
 
-  getLocations(): Promise<InventoryLocation[]> {
-    return request('/api/locations');
+  async getLocations(): Promise<InventoryLocation[]> {
+    if (await isServerBackend()) {
+      return request('/api/locations');
+    }
+    return browserStore.getLocations();
   },
 
-  createLocation(payload: {
+  async createLocation(payload: {
     code?: string;
     name: string;
     description?: string;
   }): Promise<InventoryLocation> {
-    return request('/api/locations', {
-      method: 'POST',
-      body: JSON.stringify(payload),
-    });
+    if (await isServerBackend()) {
+      return request('/api/locations', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
+    }
+    return browserStore.createLocation(payload);
   },
 
-  updateLocation(
+  async updateLocation(
     id: number,
     payload: {
       code?: string;
@@ -99,21 +136,30 @@ export const api = {
       description?: string;
     },
   ): Promise<InventoryLocation> {
-    return request(`/api/locations/${id}`, {
-      method: 'PUT',
-      body: JSON.stringify(payload),
-    });
+    if (await isServerBackend()) {
+      return request(`/api/locations/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify(payload),
+      });
+    }
+    return browserStore.updateLocation(id, payload);
   },
 
-  deleteLocation(id: number): Promise<{ ok: boolean }> {
-    return request(`/api/locations/${id}`, { method: 'DELETE' });
+  async deleteLocation(id: number): Promise<{ ok: boolean }> {
+    if (await isServerBackend()) {
+      return request(`/api/locations/${id}`, { method: 'DELETE' });
+    }
+    return browserStore.deleteLocation(id);
   },
 
-  getProducts(): Promise<Product[]> {
-    return request('/api/products');
+  async getProducts(): Promise<Product[]> {
+    if (await isServerBackend()) {
+      return request('/api/products');
+    }
+    return browserStore.getProducts();
   },
 
-  createProduct(payload: {
+  async createProduct(payload: {
     sap_code: string;
     model_name: string;
     location?: string;
@@ -126,13 +172,16 @@ export const api = {
       use_qty: number | null;
     }>;
   }): Promise<Product> {
-    return request('/api/products', {
-      method: 'POST',
-      body: JSON.stringify(payload),
-    });
+    if (await isServerBackend()) {
+      return request('/api/products', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
+    }
+    return browserStore.createProduct(payload);
   },
 
-  bulkImportProducts(payload: {
+  async bulkImportProducts(payload: {
     mode: 'skip_existing' | 'replace_parts';
     models: Array<{
       sap_code: string;
@@ -152,13 +201,16 @@ export const api = {
     skippedCount: number;
     partsCount: number;
   }> {
-    return request('/api/products/bulk-import', {
-      method: 'POST',
-      body: JSON.stringify(payload),
-    });
+    if (await isServerBackend()) {
+      return request('/api/products/bulk-import', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
+    }
+    return browserStore.bulkImportProducts(payload);
   },
 
-  updateProduct(
+  async updateProduct(
     id: number,
     payload: Partial<{
       sap_code: string;
@@ -168,17 +220,23 @@ export const api = {
       is_active: boolean;
     }>,
   ): Promise<Product> {
-    return request(`/api/products/${id}`, {
-      method: 'PUT',
-      body: JSON.stringify(payload),
-    });
+    if (await isServerBackend()) {
+      return request(`/api/products/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify(payload),
+      });
+    }
+    return browserStore.updateProduct(id, payload);
   },
 
-  deleteProduct(id: number): Promise<{ ok: boolean }> {
-    return request(`/api/products/${id}`, { method: 'DELETE' });
+  async deleteProduct(id: number): Promise<{ ok: boolean }> {
+    if (await isServerBackend()) {
+      return request(`/api/products/${id}`, { method: 'DELETE' });
+    }
+    return browserStore.deleteProduct(id);
   },
 
-  addPart(
+  async addPart(
     productId: number,
     payload: {
       sn_order?: number;
@@ -188,13 +246,16 @@ export const api = {
       use_qty: number | null;
     },
   ): Promise<ProductPart> {
-    return request(`/api/products/${productId}/parts`, {
-      method: 'POST',
-      body: JSON.stringify(payload),
-    });
+    if (await isServerBackend()) {
+      return request(`/api/products/${productId}/parts`, {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
+    }
+    return browserStore.addPart(productId, payload);
   },
 
-  bulkAddParts(
+  async bulkAddParts(
     productId: number,
     parts: Array<{
       sn_order?: number;
@@ -204,13 +265,16 @@ export const api = {
       use_qty: number | null;
     }>,
   ): Promise<{ added: number }> {
-    return request(`/api/products/${productId}/parts/bulk`, {
-      method: 'POST',
-      body: JSON.stringify({ parts }),
-    });
+    if (await isServerBackend()) {
+      return request(`/api/products/${productId}/parts/bulk`, {
+        method: 'POST',
+        body: JSON.stringify({ parts }),
+      });
+    }
+    return browserStore.bulkAddParts(productId, parts);
   },
 
-  updatePart(
+  async updatePart(
     partId: number,
     payload: Partial<{
       sn_order: number;
@@ -220,39 +284,54 @@ export const api = {
       use_qty: number | null;
     }>,
   ): Promise<ProductPart> {
-    return request(`/api/parts/${partId}`, {
-      method: 'PUT',
-      body: JSON.stringify(payload),
-    });
+    if (await isServerBackend()) {
+      return request(`/api/parts/${partId}`, {
+        method: 'PUT',
+        body: JSON.stringify(payload),
+      });
+    }
+    return browserStore.updatePart(partId, payload);
   },
 
-  deletePart(partId: number): Promise<{ ok: boolean }> {
-    return request(`/api/parts/${partId}`, { method: 'DELETE' });
+  async deletePart(partId: number): Promise<{ ok: boolean }> {
+    if (await isServerBackend()) {
+      return request(`/api/parts/${partId}`, { method: 'DELETE' });
+    }
+    return browserStore.deletePart(partId);
   },
 
-  getSessions(): Promise<OpnameSession[]> {
-    return request('/api/sessions');
+  async getSessions(): Promise<OpnameSession[]> {
+    if (await isServerBackend()) {
+      return request('/api/sessions');
+    }
+    return browserStore.getSessions();
   },
 
-  createSession(payload: {
+  async createSession(payload: {
     period_month: string;
     period_label: string;
     opname_date?: string;
     notes: string;
   }): Promise<OpnameSession> {
-    return request('/api/sessions', {
-      method: 'POST',
-      body: JSON.stringify(payload),
-    });
+    if (await isServerBackend()) {
+      return request('/api/sessions', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
+    }
+    return browserStore.createSession(payload);
   },
 
-  getSessionEntries(
+  async getSessionEntries(
     sessionId: number,
   ): Promise<{ session: OpnameSession; entries: OpnameEntry[] }> {
-    return request(`/api/sessions/${sessionId}/entries`);
+    if (await isServerBackend()) {
+      return request(`/api/sessions/${sessionId}/entries`);
+    }
+    return browserStore.getSessionEntries(sessionId);
   },
 
-  updateEntry(
+  async updateEntry(
     sessionId: number,
     entryId: number,
     payload: {
@@ -263,56 +342,83 @@ export const api = {
       notes?: string;
     },
   ): Promise<OpnameEntry> {
-    return request(`/api/sessions/${sessionId}/entries/${entryId}`, {
-      method: 'PATCH',
-      body: JSON.stringify(payload),
-    });
+    if (await isServerBackend()) {
+      return request(`/api/sessions/${sessionId}/entries/${entryId}`, {
+        method: 'PATCH',
+        body: JSON.stringify(payload),
+      });
+    }
+    return browserStore.updateEntry(sessionId, entryId, payload);
   },
 
-  submitSession(
+  async submitSession(
     sessionId: number,
     operatorName: string,
     productId?: number,
     location?: string,
     sourceLocation?: string,
   ): Promise<{ session: OpnameSession; entries: OpnameEntry[] }> {
-    return request(`/api/sessions/${sessionId}/submit`, {
-      method: 'POST',
-      body: JSON.stringify({
-        operator_name: operatorName,
-        product_id: productId,
-        location,
-        source_location: sourceLocation ?? '',
-      }),
-    });
+    if (await isServerBackend()) {
+      return request(`/api/sessions/${sessionId}/submit`, {
+        method: 'POST',
+        body: JSON.stringify({
+          operator_name: operatorName,
+          product_id: productId,
+          location,
+          source_location: sourceLocation ?? '',
+        }),
+      });
+    }
+    return browserStore.submitSession(
+      sessionId,
+      operatorName,
+      productId,
+      location,
+      sourceLocation,
+    );
   },
 
-  reopenModel(
+  async reopenModel(
     sessionId: number,
     productId: number,
     location?: string,
   ): Promise<{ session: OpnameSession; entries: OpnameEntry[] }> {
-    return request(`/api/sessions/${sessionId}/reopen-model`, {
-      method: 'POST',
-      body: JSON.stringify({ product_id: productId, location }),
-    });
+    if (await isServerBackend()) {
+      return request(`/api/sessions/${sessionId}/reopen-model`, {
+        method: 'POST',
+        body: JSON.stringify({ product_id: productId, location }),
+      });
+    }
+    return browserStore.reopenModel(sessionId, productId, location);
   },
 
-  syncSessionMaster(sessionId: number): Promise<{ addedCount: number }> {
-    return request(`/api/sessions/${sessionId}/sync-master`, {
-      method: 'POST',
-    });
+  async syncSessionMaster(sessionId: number): Promise<{ addedCount: number }> {
+    if (await isServerBackend()) {
+      return request(`/api/sessions/${sessionId}/sync-master`, {
+        method: 'POST',
+      });
+    }
+    return browserStore.syncSessionMaster(sessionId);
   },
 
-  closeSession(sessionId: number): Promise<{ ok: boolean; closed_at: string }> {
-    return request(`/api/sessions/${sessionId}/close`, { method: 'POST' });
+  async closeSession(sessionId: number): Promise<{ ok: boolean; closed_at: string }> {
+    if (await isServerBackend()) {
+      return request(`/api/sessions/${sessionId}/close`, { method: 'POST' });
+    }
+    return browserStore.closeSession(sessionId);
   },
 
-  reopenSession(sessionId: number): Promise<{ ok: boolean }> {
-    return request(`/api/sessions/${sessionId}/reopen`, { method: 'POST' });
+  async reopenSession(sessionId: number): Promise<{ ok: boolean }> {
+    if (await isServerBackend()) {
+      return request(`/api/sessions/${sessionId}/reopen`, { method: 'POST' });
+    }
+    return browserStore.reopenSession(sessionId);
   },
 
-  deleteSession(sessionId: number): Promise<{ ok: boolean }> {
-    return request(`/api/sessions/${sessionId}`, { method: 'DELETE' });
+  async deleteSession(sessionId: number): Promise<{ ok: boolean }> {
+    if (await isServerBackend()) {
+      return request(`/api/sessions/${sessionId}`, { method: 'DELETE' });
+    }
+    return browserStore.deleteSession(sessionId);
   },
 };
