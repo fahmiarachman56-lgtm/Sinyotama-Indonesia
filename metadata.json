@@ -1,0 +1,6 @@
+{
+  "name": "JoranStock — Stock Opname Pabrik Pancing",
+  "description": "Sistem stock opname bulanan manufaktur alat pancing dengan master barang dan part, pencatatan operator langsung ke database, arsip periode, serta export Microsoft Excel (.xlsx).",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
