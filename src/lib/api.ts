@@ -6,6 +6,8 @@ import type {
   ProductPart,
 } from '../types.ts';
 import { browserStore } from './browserStore.ts';
+import { isSupabaseConfigured } from './supabase.ts';
+import { ensureSupabaseSeeded, supabaseStore } from './supabaseStore.ts';
 
 const TOKEN_STORAGE_KEY = 'joranstock_admin_token';
 
@@ -21,9 +23,12 @@ export function setAdminToken(token: string | null) {
   }
 }
 
-let backendModePromise: Promise<'server' | 'browser'> | null = null;
+let backendModePromise: Promise<'supabase' | 'server' | 'browser'> | null = null;
 
-async function isServerBackend(): Promise<boolean> {
+async function getBackendMode(): Promise<'supabase' | 'server' | 'browser'> {
+  if (isSupabaseConfigured) {
+    return 'supabase';
+  }
   if (!backendModePromise) {
     backendModePromise = (async () => {
       try {
@@ -36,12 +41,12 @@ async function isServerBackend(): Promise<boolean> {
           }
         }
       } catch {
-        // Static hosting (e.g. Vercel without backend/Supabase)
+        // Static hosting without Supabase env vars
       }
       return 'browser';
     })();
   }
-  return (await backendModePromise) === 'server';
+  return backendModePromise;
 }
 
 async function request<T>(url: string, options: RequestInit = {}): Promise<T> {
@@ -69,27 +74,57 @@ async function request<T>(url: string, options: RequestInit = {}): Promise<T> {
 }
 
 export const api = {
+  async ensureSeeded(): Promise<void> {
+    if (isSupabaseConfigured) {
+      await ensureSupabaseSeeded();
+    }
+  },
+
+  subscribeWorkspace(onUpdate: () => void): () => void {
+    if (isSupabaseConfigured) {
+      return supabaseStore.subscribeWorkspace(onUpdate);
+    }
+    return () => {};
+  },
+
+  subscribeSessionEntries(sessionId: number, onUpdate: () => void): () => void {
+    if (isSupabaseConfigured) {
+      return supabaseStore.subscribeSessionEntries(sessionId, onUpdate);
+    }
+    return () => {};
+  },
+
   async checkAdminSession(): Promise<{ isAdmin: boolean }> {
-    if (await isServerBackend()) {
+    const mode = await getBackendMode();
+    if (mode === 'supabase') {
+      const token = getAdminToken();
+      return { isAdmin: Boolean(token && token.startsWith('sb_admin_')) };
+    }
+    if (mode === 'server') {
       return request('/api/auth/session');
     }
     return { isAdmin: browserStore.checkLocalAdminToken(getAdminToken()) };
   },
 
   async verifyPin(pin: string): Promise<{ token: string; expiresAt: number }> {
-    const res = (await isServerBackend())
-      ? await request<{ token: string; expiresAt: number }>('/api/auth/verify-pin', {
-          method: 'POST',
-          body: JSON.stringify({ pin }),
-        })
-      : await browserStore.verifyPin(pin);
+    const mode = await getBackendMode();
+    const res =
+      mode === 'supabase'
+        ? await supabaseStore.verifyPin(pin)
+        : mode === 'server'
+          ? await request<{ token: string; expiresAt: number }>('/api/auth/verify-pin', {
+              method: 'POST',
+              body: JSON.stringify({ pin }),
+            })
+          : await browserStore.verifyPin(pin);
     setAdminToken(res.token);
     return res;
   },
 
   async logoutAdmin(): Promise<void> {
     try {
-      if (await isServerBackend()) {
+      const mode = await getBackendMode();
+      if (mode === 'server') {
         await request('/api/auth/logout', { method: 'POST' });
       }
     } finally {
@@ -98,7 +133,9 @@ export const api = {
   },
 
   async changePin(currentPin: string, newPin: string): Promise<{ ok: boolean }> {
-    if (await isServerBackend()) {
+    const mode = await getBackendMode();
+    if (mode === 'supabase') return supabaseStore.changePin(currentPin, newPin);
+    if (mode === 'server') {
       return request('/api/auth/change-pin', {
         method: 'POST',
         body: JSON.stringify({ currentPin, newPin }),
@@ -108,9 +145,9 @@ export const api = {
   },
 
   async getLocations(): Promise<InventoryLocation[]> {
-    if (await isServerBackend()) {
-      return request('/api/locations');
-    }
+    const mode = await getBackendMode();
+    if (mode === 'supabase') return supabaseStore.getLocations();
+    if (mode === 'server') return request('/api/locations');
     return browserStore.getLocations();
   },
 
@@ -119,7 +156,9 @@ export const api = {
     name: string;
     description?: string;
   }): Promise<InventoryLocation> {
-    if (await isServerBackend()) {
+    const mode = await getBackendMode();
+    if (mode === 'supabase') return supabaseStore.createLocation(payload);
+    if (mode === 'server') {
       return request('/api/locations', {
         method: 'POST',
         body: JSON.stringify(payload),
@@ -136,7 +175,9 @@ export const api = {
       description?: string;
     },
   ): Promise<InventoryLocation> {
-    if (await isServerBackend()) {
+    const mode = await getBackendMode();
+    if (mode === 'supabase') return supabaseStore.updateLocation(id, payload);
+    if (mode === 'server') {
       return request(`/api/locations/${id}`, {
         method: 'PUT',
         body: JSON.stringify(payload),
@@ -146,16 +187,18 @@ export const api = {
   },
 
   async deleteLocation(id: number): Promise<{ ok: boolean }> {
-    if (await isServerBackend()) {
+    const mode = await getBackendMode();
+    if (mode === 'supabase') return supabaseStore.deleteLocation(id);
+    if (mode === 'server') {
       return request(`/api/locations/${id}`, { method: 'DELETE' });
     }
     return browserStore.deleteLocation(id);
   },
 
   async getProducts(): Promise<Product[]> {
-    if (await isServerBackend()) {
-      return request('/api/products');
-    }
+    const mode = await getBackendMode();
+    if (mode === 'supabase') return supabaseStore.getProducts();
+    if (mode === 'server') return request('/api/products');
     return browserStore.getProducts();
   },
 
@@ -172,7 +215,9 @@ export const api = {
       use_qty: number | null;
     }>;
   }): Promise<Product> {
-    if (await isServerBackend()) {
+    const mode = await getBackendMode();
+    if (mode === 'supabase') return supabaseStore.createProduct(payload);
+    if (mode === 'server') {
       return request('/api/products', {
         method: 'POST',
         body: JSON.stringify(payload),
@@ -201,7 +246,9 @@ export const api = {
     skippedCount: number;
     partsCount: number;
   }> {
-    if (await isServerBackend()) {
+    const mode = await getBackendMode();
+    if (mode === 'supabase') return supabaseStore.bulkImportProducts(payload);
+    if (mode === 'server') {
       return request('/api/products/bulk-import', {
         method: 'POST',
         body: JSON.stringify(payload),
@@ -220,7 +267,9 @@ export const api = {
       is_active: boolean;
     }>,
   ): Promise<Product> {
-    if (await isServerBackend()) {
+    const mode = await getBackendMode();
+    if (mode === 'supabase') return supabaseStore.updateProduct(id, payload);
+    if (mode === 'server') {
       return request(`/api/products/${id}`, {
         method: 'PUT',
         body: JSON.stringify(payload),
@@ -230,7 +279,9 @@ export const api = {
   },
 
   async deleteProduct(id: number): Promise<{ ok: boolean }> {
-    if (await isServerBackend()) {
+    const mode = await getBackendMode();
+    if (mode === 'supabase') return supabaseStore.deleteProduct(id);
+    if (mode === 'server') {
       return request(`/api/products/${id}`, { method: 'DELETE' });
     }
     return browserStore.deleteProduct(id);
@@ -246,7 +297,9 @@ export const api = {
       use_qty: number | null;
     },
   ): Promise<ProductPart> {
-    if (await isServerBackend()) {
+    const mode = await getBackendMode();
+    if (mode === 'supabase') return supabaseStore.addPart(productId, payload);
+    if (mode === 'server') {
       return request(`/api/products/${productId}/parts`, {
         method: 'POST',
         body: JSON.stringify(payload),
@@ -265,7 +318,9 @@ export const api = {
       use_qty: number | null;
     }>,
   ): Promise<{ added: number }> {
-    if (await isServerBackend()) {
+    const mode = await getBackendMode();
+    if (mode === 'supabase') return supabaseStore.bulkAddParts(productId, parts);
+    if (mode === 'server') {
       return request(`/api/products/${productId}/parts/bulk`, {
         method: 'POST',
         body: JSON.stringify({ parts }),
@@ -284,7 +339,9 @@ export const api = {
       use_qty: number | null;
     }>,
   ): Promise<ProductPart> {
-    if (await isServerBackend()) {
+    const mode = await getBackendMode();
+    if (mode === 'supabase') return supabaseStore.updatePart(partId, payload);
+    if (mode === 'server') {
       return request(`/api/parts/${partId}`, {
         method: 'PUT',
         body: JSON.stringify(payload),
@@ -294,16 +351,18 @@ export const api = {
   },
 
   async deletePart(partId: number): Promise<{ ok: boolean }> {
-    if (await isServerBackend()) {
+    const mode = await getBackendMode();
+    if (mode === 'supabase') return supabaseStore.deletePart(partId);
+    if (mode === 'server') {
       return request(`/api/parts/${partId}`, { method: 'DELETE' });
     }
     return browserStore.deletePart(partId);
   },
 
   async getSessions(): Promise<OpnameSession[]> {
-    if (await isServerBackend()) {
-      return request('/api/sessions');
-    }
+    const mode = await getBackendMode();
+    if (mode === 'supabase') return supabaseStore.getSessions();
+    if (mode === 'server') return request('/api/sessions');
     return browserStore.getSessions();
   },
 
@@ -313,7 +372,9 @@ export const api = {
     opname_date?: string;
     notes: string;
   }): Promise<OpnameSession> {
-    if (await isServerBackend()) {
+    const mode = await getBackendMode();
+    if (mode === 'supabase') return supabaseStore.createSession(payload);
+    if (mode === 'server') {
       return request('/api/sessions', {
         method: 'POST',
         body: JSON.stringify(payload),
@@ -325,9 +386,9 @@ export const api = {
   async getSessionEntries(
     sessionId: number,
   ): Promise<{ session: OpnameSession; entries: OpnameEntry[] }> {
-    if (await isServerBackend()) {
-      return request(`/api/sessions/${sessionId}/entries`);
-    }
+    const mode = await getBackendMode();
+    if (mode === 'supabase') return supabaseStore.getSessionEntries(sessionId);
+    if (mode === 'server') return request(`/api/sessions/${sessionId}/entries`);
     return browserStore.getSessionEntries(sessionId);
   },
 
@@ -342,7 +403,9 @@ export const api = {
       notes?: string;
     },
   ): Promise<OpnameEntry> {
-    if (await isServerBackend()) {
+    const mode = await getBackendMode();
+    if (mode === 'supabase') return supabaseStore.updateEntry(sessionId, entryId, payload);
+    if (mode === 'server') {
       return request(`/api/sessions/${sessionId}/entries/${entryId}`, {
         method: 'PATCH',
         body: JSON.stringify(payload),
@@ -358,7 +421,17 @@ export const api = {
     location?: string,
     sourceLocation?: string,
   ): Promise<{ session: OpnameSession; entries: OpnameEntry[] }> {
-    if (await isServerBackend()) {
+    const mode = await getBackendMode();
+    if (mode === 'supabase') {
+      return supabaseStore.submitSession(
+        sessionId,
+        operatorName,
+        productId,
+        location,
+        sourceLocation,
+      );
+    }
+    if (mode === 'server') {
       return request(`/api/sessions/${sessionId}/submit`, {
         method: 'POST',
         body: JSON.stringify({
@@ -383,7 +456,9 @@ export const api = {
     productId: number,
     location?: string,
   ): Promise<{ session: OpnameSession; entries: OpnameEntry[] }> {
-    if (await isServerBackend()) {
+    const mode = await getBackendMode();
+    if (mode === 'supabase') return supabaseStore.reopenModel(sessionId, productId, location);
+    if (mode === 'server') {
       return request(`/api/sessions/${sessionId}/reopen-model`, {
         method: 'POST',
         body: JSON.stringify({ product_id: productId, location }),
@@ -393,7 +468,9 @@ export const api = {
   },
 
   async syncSessionMaster(sessionId: number): Promise<{ addedCount: number }> {
-    if (await isServerBackend()) {
+    const mode = await getBackendMode();
+    if (mode === 'supabase') return supabaseStore.syncSessionMaster(sessionId);
+    if (mode === 'server') {
       return request(`/api/sessions/${sessionId}/sync-master`, {
         method: 'POST',
       });
@@ -402,21 +479,27 @@ export const api = {
   },
 
   async closeSession(sessionId: number): Promise<{ ok: boolean; closed_at: string }> {
-    if (await isServerBackend()) {
+    const mode = await getBackendMode();
+    if (mode === 'supabase') return supabaseStore.closeSession(sessionId);
+    if (mode === 'server') {
       return request(`/api/sessions/${sessionId}/close`, { method: 'POST' });
     }
     return browserStore.closeSession(sessionId);
   },
 
   async reopenSession(sessionId: number): Promise<{ ok: boolean }> {
-    if (await isServerBackend()) {
+    const mode = await getBackendMode();
+    if (mode === 'supabase') return supabaseStore.reopenSession(sessionId);
+    if (mode === 'server') {
       return request(`/api/sessions/${sessionId}/reopen`, { method: 'POST' });
     }
     return browserStore.reopenSession(sessionId);
   },
 
   async deleteSession(sessionId: number): Promise<{ ok: boolean }> {
-    if (await isServerBackend()) {
+    const mode = await getBackendMode();
+    if (mode === 'supabase') return supabaseStore.deleteSession(sessionId);
+    if (mode === 'server') {
       return request(`/api/sessions/${sessionId}`, { method: 'DELETE' });
     }
     return browserStore.deleteSession(sessionId);

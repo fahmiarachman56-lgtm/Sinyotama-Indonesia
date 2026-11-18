@@ -43,6 +43,7 @@ export default function App() {
 
   const loadAll = useCallback(async () => {
     try {
+      await api.ensureSeeded();
       const [prods, locList, sessList] = await Promise.all([
         api.getProducts(),
         api.getLocations(),
@@ -59,7 +60,7 @@ export default function App() {
       setLoadError(null);
     } catch (err) {
       setLoadError(
-        err instanceof Error ? err.message : 'Gagal terhubung ke server database.',
+        err instanceof Error ? err.message : 'Gagal memuat data inventory.',
       );
     } finally {
       setInitialLoading(false);
@@ -74,13 +75,23 @@ export default function App() {
           setRole('admin');
         } else {
           setAdminToken(null);
+          setRole('operator');
         }
       })
       .catch(() => {
         setAdminToken(null);
+        setRole('operator');
       });
 
     void loadAll();
+
+    const unsubWorkspace = api.subscribeWorkspace(() => {
+      void loadAll();
+    });
+
+    return () => {
+      unsubWorkspace();
+    };
   }, [loadAll]);
 
   const handleToggleSidebar = () => {

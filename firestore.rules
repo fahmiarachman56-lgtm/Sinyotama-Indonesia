@@ -1,0 +1,388 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global Safety Net (Default-Deny)
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // -------------------------------------------------------------------------
+    // Phase 3: Reusable Hardened Global Primitives
+    // -------------------------------------------------------------------------
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isAdmin() {
+      return isVerifiedUser() && (
+        request.auth.token.email == 'fahmiarachman56@gmail.com' ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    function isNullableInt(val) {
+      return val == null || (val is int && val >= 0 && val <= 100000000);
+    }
+
+    function isNullableNumber(val) {
+      return val == null || ((val is int || val is float) && val >= 0 && val <= 100000000);
+    }
+
+    function isNullableString(val, maxLen) {
+      return val == null || (val is string && val.size() <= maxLen);
+    }
+
+    // -------------------------------------------------------------------------
+    // Entity Validation Blueprints (Phase 4 Pillar 2)
+    // -------------------------------------------------------------------------
+    function isValidAdminUser(data) {
+      return data.keys().hasAll(['uid', 'email', 'added_by_uid', 'workspace', 'created_at']) &&
+        data.keys().hasOnly(['uid', 'email', 'added_by_uid', 'workspace', 'created_at']) &&
+        isValidId(data.uid) &&
+        data.email is string && data.email.size() >= 3 && data.email.size() <= 200 &&
+        isValidId(data.added_by_uid) &&
+        data.workspace == 'sinyotama' &&
+        data.created_at is timestamp;
+    }
+
+    function isValidAppConfig(data) {
+      return data.keys().hasAll(['pin_hash', 'workspace', 'updated_by_uid', 'created_at', 'updated_at']) &&
+        data.keys().hasOnly(['pin_hash', 'workspace', 'updated_by_uid', 'created_at', 'updated_at']) &&
+        data.pin_hash is string && data.pin_hash.size() == 64 && data.pin_hash.matches('^[a-f0-9]{64}$') &&
+        data.workspace == 'sinyotama' &&
+        isValidId(data.updated_by_uid) &&
+        data.created_at is timestamp &&
+        data.updated_at is timestamp;
+    }
+
+    function isValidLocation(data) {
+      return data.keys().hasAll(['id', 'code', 'name', 'description', 'workspace', 'created_by_uid', 'created_at', 'updated_at']) &&
+        data.keys().hasOnly(['id', 'code', 'name', 'description', 'workspace', 'created_by_uid', 'created_at', 'updated_at']) &&
+        data.id is int && data.id >= 1 &&
+        data.code is string && data.code.size() >= 1 && data.code.size() <= 32 &&
+        data.name is string && data.name.size() >= 1 && data.name.size() <= 120 &&
+        data.description is string && data.description.size() <= 300 &&
+        data.workspace == 'sinyotama' &&
+        isValidId(data.created_by_uid) &&
+        data.created_at is timestamp &&
+        data.updated_at is timestamp;
+    }
+
+    function isValidProduct(data) {
+      return data.keys().hasAll(['id', 'sap_code', 'model_name', 'location', 'section', 'is_active', 'workspace', 'created_by_uid', 'created_at', 'updated_at']) &&
+        data.keys().hasOnly(['id', 'sap_code', 'model_name', 'location', 'section', 'is_active', 'workspace', 'created_by_uid', 'created_at', 'updated_at']) &&
+        data.id is int && data.id >= 1 &&
+        data.sap_code is string && data.sap_code.size() >= 1 && data.sap_code.size() <= 64 &&
+        data.model_name is string && data.model_name.size() >= 1 && data.model_name.size() <= 160 &&
+        data.location is string && data.location.size() <= 64 &&
+        data.section is string && data.section.size() >= 1 && data.section.size() <= 64 &&
+        data.is_active is bool &&
+        data.workspace == 'sinyotama' &&
+        isValidId(data.created_by_uid) &&
+        data.created_at is timestamp &&
+        data.updated_at is timestamp;
+    }
+
+    function isValidPart(data) {
+      return data.keys().hasAll(['id', 'product_id', 'product_doc_id', 'sn_order', 'sap_code', 'parts_name', 'section', 'use_qty', 'workspace', 'created_by_uid', 'created_at', 'updated_at']) &&
+        data.keys().hasOnly(['id', 'product_id', 'product_doc_id', 'sn_order', 'sap_code', 'parts_name', 'section', 'use_qty', 'workspace', 'created_by_uid', 'created_at', 'updated_at']) &&
+        data.id is int && data.id >= 1 &&
+        data.product_id is int && data.product_id >= 1 &&
+        isValidId(data.product_doc_id) &&
+        data.sn_order is int && data.sn_order >= 0 && data.sn_order <= 100000 &&
+        data.sap_code is string && data.sap_code.size() >= 1 && data.sap_code.size() <= 64 &&
+        data.parts_name is string && data.parts_name.size() >= 1 && data.parts_name.size() <= 200 &&
+        data.section is string && data.section.size() <= 64 &&
+        isNullableNumber(data.use_qty) &&
+        data.workspace == 'sinyotama' &&
+        isValidId(data.created_by_uid) &&
+        data.created_at is timestamp &&
+        data.updated_at is timestamp;
+    }
+
+    function isValidSession(data) {
+      return data.keys().hasAll(['id', 'period_label', 'period_month', 'opname_date', 'status', 'prepared_by', 'submitted_at', 'notes', 'closed_at', 'workspace', 'created_by_uid', 'created_at', 'updated_at']) &&
+        data.keys().hasOnly(['id', 'period_label', 'period_month', 'opname_date', 'status', 'prepared_by', 'submitted_at', 'notes', 'closed_at', 'workspace', 'created_by_uid', 'created_at', 'updated_at']) &&
+        data.id is int && data.id >= 1 &&
+        data.period_label is string && data.period_label.size() >= 1 && data.period_label.size() <= 80 &&
+        data.period_month is string && data.period_month.size() >= 7 && data.period_month.size() <= 16 && data.period_month.matches('^[0-9]{4}-[0-9]{2}$') &&
+        data.opname_date is string && data.opname_date.size() <= 32 &&
+        (data.status == 'active' || data.status == 'closed') &&
+        data.prepared_by is string && data.prepared_by.size() <= 120 &&
+        isNullableString(data.submitted_at, 64) &&
+        data.notes is string && data.notes.size() <= 500 &&
+        isNullableString(data.closed_at, 64) &&
+        data.workspace == 'sinyotama' &&
+        isValidId(data.created_by_uid) &&
+        data.created_at is timestamp &&
+        data.updated_at is timestamp;
+    }
+
+    function isValidEntry(data) {
+      return data.keys().hasAll([
+        'id', 'session_id', 'session_doc_id', 'product_id', 'product_doc_id',
+        'part_id', 'sn_order', 'item_type', 'model_name', 'location',
+        'sap_code', 'parts_name', 'section', 'use_qty',
+        'qty_ok', 'qty_ok_2', 'qty_nc', 'total_qty',
+        'operator_name', 'notes', 'is_submitted', 'submitted_at',
+        'submitted_by_uid', 'updated_by_uid', 'workspace',
+        'created_at', 'updated_at'
+      ]) &&
+      data.keys().hasOnly([
+        'id', 'session_id', 'session_doc_id', 'product_id', 'product_doc_id',
+        'part_id', 'sn_order', 'item_type', 'model_name', 'location',
+        'sap_code', 'parts_name', 'section', 'use_qty',
+        'qty_ok', 'qty_ok_2', 'qty_nc', 'total_qty',
+        'operator_name', 'notes', 'is_submitted', 'submitted_at',
+        'submitted_by_uid', 'updated_by_uid', 'workspace',
+        'created_at', 'updated_at'
+      ]) &&
+      data.id is int && data.id >= 1 &&
+      data.session_id is int && data.session_id >= 1 &&
+      isValidId(data.session_doc_id) &&
+      data.product_id is int && data.product_id >= 1 &&
+      isValidId(data.product_doc_id) &&
+      (data.part_id == null || (data.part_id is int && data.part_id >= 1)) &&
+      data.sn_order is int && data.sn_order >= 0 && data.sn_order <= 100000 &&
+      (data.item_type == 'finished_good' || data.item_type == 'part') &&
+      data.model_name is string && data.model_name.size() >= 1 && data.model_name.size() <= 160 &&
+      data.location is string && data.location.size() <= 64 &&
+      data.sap_code is string && data.sap_code.size() >= 1 && data.sap_code.size() <= 64 &&
+      data.parts_name is string && data.parts_name.size() >= 1 && data.parts_name.size() <= 200 &&
+      data.section is string && data.section.size() <= 64 &&
+      isNullableNumber(data.use_qty) &&
+      isNullableInt(data.qty_ok) &&
+      isNullableInt(data.qty_ok_2) &&
+      isNullableInt(data.qty_nc) &&
+      isNullableInt(data.total_qty) &&
+      data.operator_name is string && data.operator_name.size() <= 120 &&
+      data.notes is string && data.notes.size() <= 500 &&
+      data.is_submitted is bool &&
+      isNullableString(data.submitted_at, 64) &&
+      (data.submitted_by_uid == null || isValidId(data.submitted_by_uid)) &&
+      (data.updated_by_uid == null || isValidId(data.updated_by_uid)) &&
+      data.workspace == 'sinyotama' &&
+      data.created_at is timestamp &&
+      data.updated_at is timestamp;
+    }
+
+    // -------------------------------------------------------------------------
+    // Collection Rules
+    // -------------------------------------------------------------------------
+
+    // Connectivity check document (read-only)
+    match /test/connection {
+      allow get: if isSignedIn();
+    }
+
+    // Admin UID registry (PII-isolated to admins)
+    match /admins/{uid} {
+      allow get: if isValidId(uid) && (isAdmin() || (isVerifiedUser() && request.auth.uid == uid));
+      allow list: if isAdmin() && resource.data.workspace == 'sinyotama';
+      allow create: if isValidId(uid) &&
+        isAdmin() &&
+        isValidAdminUser(incoming()) &&
+        incoming().uid == uid &&
+        incoming().added_by_uid == request.auth.uid &&
+        incoming().created_at == request.time;
+      allow update: if false;
+      allow delete: if isValidId(uid) && isAdmin();
+    }
+
+    // Application security config (Admin PIN hash)
+    match /app_config/{configId} {
+      allow get: if isValidId(configId) && isVerifiedUser();
+      allow list: if isVerifiedUser() && resource.data.workspace == 'sinyotama';
+      allow create: if isValidId(configId) &&
+        isAdmin() &&
+        isValidAppConfig(incoming()) &&
+        incoming().updated_by_uid == request.auth.uid &&
+        incoming().created_at == request.time &&
+        incoming().updated_at == request.time;
+      allow update: if isValidId(configId) &&
+        isAdmin() &&
+        isValidAppConfig(incoming()) &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['pin_hash', 'updated_by_uid', 'updated_at']) &&
+        incoming().created_at == existing().created_at &&
+        incoming().updated_by_uid == request.auth.uid &&
+        incoming().updated_at == request.time;
+      allow delete: if false;
+    }
+
+    // Master Warehouse / Factory Locations
+    match /locations/{locationId} {
+      allow get: if isValidId(locationId) && isVerifiedUser();
+      allow list: if isVerifiedUser() && resource.data.workspace == 'sinyotama';
+      allow create: if isValidId(locationId) &&
+        isAdmin() &&
+        isValidLocation(incoming()) &&
+        incoming().created_by_uid == request.auth.uid &&
+        incoming().created_at == request.time &&
+        incoming().updated_at == request.time;
+      allow update: if isValidId(locationId) &&
+        isAdmin() &&
+        isValidLocation(incoming()) &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['code', 'name', 'description', 'updated_at']) &&
+        incoming().id == existing().id &&
+        incoming().created_by_uid == existing().created_by_uid &&
+        incoming().created_at == existing().created_at &&
+        incoming().updated_at == request.time;
+      allow delete: if isValidId(locationId) && isAdmin();
+    }
+
+    // Master Finished-Good Products (Models)
+    match /products/{productId} {
+      allow get: if isValidId(productId) && isVerifiedUser();
+      allow list: if isVerifiedUser() && resource.data.workspace == 'sinyotama';
+      allow create: if isValidId(productId) &&
+        isAdmin() &&
+        isValidProduct(incoming()) &&
+        incoming().created_by_uid == request.auth.uid &&
+        incoming().created_at == request.time &&
+        incoming().updated_at == request.time;
+      allow update: if isValidId(productId) &&
+        isAdmin() &&
+        isValidProduct(incoming()) &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['sap_code', 'model_name', 'location', 'section', 'is_active', 'updated_at']) &&
+        incoming().id == existing().id &&
+        incoming().created_by_uid == existing().created_by_uid &&
+        incoming().created_at == existing().created_at &&
+        incoming().updated_at == request.time;
+      allow delete: if isValidId(productId) && isAdmin();
+    }
+
+    // Master Model BOM Parts (linked to /products/{product_doc_id})
+    match /parts/{partId} {
+      allow get: if isValidId(partId) && isVerifiedUser();
+      allow list: if isVerifiedUser() && resource.data.workspace == 'sinyotama';
+      allow create: if isValidId(partId) &&
+        isAdmin() &&
+        isValidPart(incoming()) &&
+        incoming().created_by_uid == request.auth.uid &&
+        incoming().created_at == request.time &&
+        incoming().updated_at == request.time &&
+        existsAfter(/databases/$(database)/documents/products/$(incoming().product_doc_id));
+      allow update: if isValidId(partId) &&
+        isAdmin() &&
+        isValidPart(incoming()) &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['sn_order', 'sap_code', 'parts_name', 'section', 'use_qty', 'updated_at']) &&
+        incoming().id == existing().id &&
+        incoming().product_id == existing().product_id &&
+        incoming().product_doc_id == existing().product_doc_id &&
+        incoming().created_by_uid == existing().created_by_uid &&
+        incoming().created_at == existing().created_at &&
+        incoming().updated_at == request.time;
+      allow delete: if isValidId(partId) && isAdmin();
+    }
+
+    // Monthly Opname Sessions
+    match /sessions/{sessionId} {
+      allow get: if isValidId(sessionId) && isVerifiedUser();
+      allow list: if isVerifiedUser() && resource.data.workspace == 'sinyotama';
+      allow create: if isValidId(sessionId) &&
+        isAdmin() &&
+        isValidSession(incoming()) &&
+        incoming().created_by_uid == request.auth.uid &&
+        incoming().created_at == request.time &&
+        incoming().updated_at == request.time;
+      allow update: if isValidId(sessionId) &&
+        isVerifiedUser() &&
+        isValidSession(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().created_by_uid == existing().created_by_uid &&
+        incoming().created_at == existing().created_at &&
+        incoming().updated_at == request.time && (
+          // Tier 1 (Admin): Close, reopen, or update session metadata
+          (isAdmin() && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'closed_at', 'prepared_by', 'submitted_at', 'notes', 'period_label', 'opname_date', 'updated_at'])) ||
+          // Tier 2 (Operator): Update prepared_by and submitted_at during active session submit
+          (existing().status == 'active' &&
+           incoming().status == 'active' &&
+           incoming().diff(existing()).affectedKeys().hasOnly(['prepared_by', 'submitted_at', 'updated_at']))
+        );
+      allow delete: if isValidId(sessionId) && isAdmin();
+    }
+
+    // Opname Count Entries
+    match /entries/{entryId} {
+      allow get: if isValidId(entryId) && isVerifiedUser();
+      allow list: if isVerifiedUser() && resource.data.workspace == 'sinyotama';
+      allow create: if isValidId(entryId) &&
+        isVerifiedUser() &&
+        isValidEntry(incoming()) &&
+        incoming().is_submitted == false &&
+        incoming().submitted_at == null &&
+        incoming().submitted_by_uid == null &&
+        incoming().updated_by_uid == request.auth.uid &&
+        incoming().created_at == request.time &&
+        incoming().updated_at == request.time &&
+        getAfter(/databases/$(database)/documents/sessions/$(incoming().session_doc_id)).data.status == 'active' &&
+        existsAfter(/databases/$(database)/documents/products/$(incoming().product_doc_id));
+      allow update: if isValidId(entryId) &&
+        isVerifiedUser() &&
+        isValidEntry(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().session_id == existing().session_id &&
+        incoming().session_doc_id == existing().session_doc_id &&
+        incoming().product_id == existing().product_id &&
+        incoming().product_doc_id == existing().product_doc_id &&
+        incoming().created_at == existing().created_at &&
+        incoming().updated_at == request.time &&
+        incoming().updated_by_uid == request.auth.uid && (
+          // Tier 1 (Admin): Reopen submitted sheet or adjust entries while session is active
+          (isAdmin() &&
+           get(/databases/$(database)/documents/sessions/$(existing().session_doc_id)).data.status == 'active' &&
+           incoming().diff(existing()).affectedKeys().hasOnly([
+             'qty_ok', 'qty_ok_2', 'qty_nc', 'total_qty', 'notes',
+             'location', 'operator_name', 'is_submitted', 'submitted_at',
+             'submitted_by_uid', 'updated_by_uid', 'updated_at'
+           ])) ||
+          // Tier 2a (Operator Draft Edit): Allowed only while unlocked & session active
+          (existing().is_submitted == false &&
+           incoming().is_submitted == false &&
+           get(/databases/$(database)/documents/sessions/$(existing().session_doc_id)).data.status == 'active' &&
+           incoming().diff(existing()).affectedKeys().hasOnly([
+             'qty_ok', 'qty_ok_2', 'qty_nc', 'total_qty', 'notes',
+             'updated_by_uid', 'updated_at'
+           ])) ||
+          // Tier 2b (Operator Submit): Lock unlocked draft sheet & stamp operator identity
+          (existing().is_submitted == false &&
+           incoming().is_submitted == true &&
+           incoming().submitted_by_uid == request.auth.uid &&
+           incoming().operator_name.size() >= 1 &&
+           incoming().location.size() >= 1 &&
+           get(/databases/$(database)/documents/sessions/$(existing().session_doc_id)).data.status == 'active' &&
+           incoming().diff(existing()).affectedKeys().hasOnly([
+             'location', 'operator_name', 'is_submitted', 'submitted_at',
+             'submitted_by_uid', 'updated_by_uid', 'updated_at'
+           ])) ||
+          // Tier 2c (Reopen Submitted Sheet): Submitter (or Admin above) can unlock while session is active
+          (existing().is_submitted == true &&
+           incoming().is_submitted == false &&
+           existing().submitted_by_uid == request.auth.uid &&
+           get(/databases/$(database)/documents/sessions/$(existing().session_doc_id)).data.status == 'active' &&
+           incoming().diff(existing()).affectedKeys().hasOnly([
+             'is_submitted', 'updated_by_uid', 'updated_at'
+           ]))
+        );
+      allow delete: if isValidId(entryId) && isAdmin();
+    }
+  }
+}

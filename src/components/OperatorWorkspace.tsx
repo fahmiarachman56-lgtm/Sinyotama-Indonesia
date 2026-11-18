@@ -119,37 +119,55 @@ export function OperatorWorkspace({
     setSubmitBanner(null);
     setActiveModalProductId(null);
 
+    const applyEntriesData = (res: { session: OpnameSession; entries: OpnameEntry[] }) => {
+      if (cancelled) return;
+      setSession(res.session);
+      setEntries(res.entries);
+      setDrafts((prevDrafts) => {
+        const map: Record<number, DraftRowValues> = {};
+        for (const item of res.entries) {
+          // Preserve in-flight local edits while typing
+          if (pendingPayloadsRef.current[item.id] && prevDrafts[item.id]) {
+            map[item.id] = prevDrafts[item.id];
+          } else {
+            map[item.id] = {
+              qty_ok: item.qty_ok !== null ? String(item.qty_ok) : '',
+              qty_ok_2: item.qty_ok_2 !== null ? String(item.qty_ok_2) : '',
+              qty_nc: item.qty_nc !== null ? String(item.qty_nc) : '',
+              notes: item.notes || '',
+            };
+          }
+        }
+        return map;
+      });
+    };
+
     api
       .getSessionEntries(selectedSessionId)
       .then((res) => {
-        if (cancelled) return;
-        setSession(res.session);
-        setEntries(res.entries);
-        const map: Record<number, DraftRowValues> = {};
-        for (const item of res.entries) {
-          map[item.id] = {
-            qty_ok: item.qty_ok !== null ? String(item.qty_ok) : '',
-            qty_ok_2: item.qty_ok_2 !== null ? String(item.qty_ok_2) : '',
-            qty_nc: item.qty_nc !== null ? String(item.qty_nc) : '',
-            notes: item.notes || '',
-          };
-        }
-        setDrafts(map);
-        setSaveState({});
-        pendingPayloadsRef.current = {};
+        applyEntriesData(res);
+        if (!cancelled) setLoading(false);
       })
       .catch((err) => {
         if (cancelled) return;
         setError(
           err instanceof Error ? err.message : 'Gagal memuat daftar form opname.',
         );
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
+        setLoading(false);
       });
+
+    const unsubscribe = api.subscribeSessionEntries(selectedSessionId, () => {
+      api
+        .getSessionEntries(selectedSessionId)
+        .then(applyEntriesData)
+        .catch(() => {
+          // Keep current view if background realtime refresh transiently fails
+        });
+    });
 
     return () => {
       cancelled = true;
+      unsubscribe();
     };
   }, [selectedSessionId]);
 
