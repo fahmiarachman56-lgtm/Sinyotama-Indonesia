@@ -179,12 +179,15 @@ export default function App() {
           mobileMenuOpen ? 'translate-x-0' : '-translate-x-full'
         }`}
       >
-        <div className="flex h-16 items-center justify-between border-b border-slate-800 px-5">
+        <div className="flex min-h-16 items-center justify-between border-b border-slate-800 px-5 py-3">
           <div>
             <div className="font-display text-base font-bold tracking-tight text-white">
               Sinyotama Indonesia
             </div>
             <div className="text-xs text-slate-400">Inventory Sistem</div>
+            <div className="mt-0.5 text-[11px] font-medium text-blue-400">
+              Versi Vercel
+            </div>
           </div>
           <button
             type="button"
