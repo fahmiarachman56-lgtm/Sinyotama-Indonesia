@@ -32,6 +32,7 @@ export default function App() {
   const [pendingAdminView, setPendingAdminView] = useState<NavView | null>(null);
   const [pinModalOpen, setPinModalOpen] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [desktopSidebarOpen, setDesktopSidebarOpen] = useState(true);
 
   const [products, setProducts] = useState<Product[]>([]);
   const [locations, setLocations] = useState<InventoryLocation[]>([]);
@@ -81,6 +82,14 @@ export default function App() {
 
     void loadAll();
   }, [loadAll]);
+
+  const handleToggleSidebar = () => {
+    if (typeof window !== 'undefined' && window.innerWidth >= 1024) {
+      setDesktopSidebarOpen((prev) => !prev);
+    } else {
+      setMobileMenuOpen((prev) => !prev);
+    }
+  };
 
   const handleNavClick = (view: NavView, requiresAdmin: boolean) => {
     setMobileMenuOpen(false);
@@ -175,8 +184,12 @@ export default function App() {
 
       {/* Left Sidebar Navigation */}
       <aside
-        className={`fixed inset-y-0 left-0 z-40 flex w-64 flex-col bg-slate-900 text-slate-100 transition-transform duration-200 lg:static lg:translate-x-0 ${
+        className={`fixed inset-y-0 left-0 z-40 flex w-64 shrink-0 flex-col bg-slate-900 text-slate-100 transition-all duration-200 ${
           mobileMenuOpen ? 'translate-x-0' : '-translate-x-full'
+        } ${
+          desktopSidebarOpen
+            ? 'lg:static lg:translate-x-0'
+            : 'lg:fixed lg:-translate-x-full'
         }`}
       >
         <div className="flex min-h-16 items-center justify-between border-b border-slate-800 px-5 py-3">
@@ -273,14 +286,20 @@ export default function App() {
           <div className="flex min-w-0 items-center gap-3">
             <button
               type="button"
-              onClick={() => setMobileMenuOpen(true)}
-              className="rounded-lg border border-slate-200 p-2 text-slate-600 hover:bg-slate-50 lg:hidden"
-              aria-label="Buka menu navigasi"
+              onClick={handleToggleSidebar}
+              className="rounded-lg border border-slate-200 p-2 text-slate-600 hover:bg-slate-50"
+              aria-label="Buka atau tutup menu navigasi"
+              title="Buka / Tutup Sidebar"
             >
               <Menu className="h-4 w-4" />
             </button>
-            <div className="truncate text-sm font-medium text-slate-700">
-              {breadcrumbText}
+            <div className="min-w-0">
+              <div className="truncate text-sm font-medium text-slate-700">
+                {breadcrumbText}
+              </div>
+              <div className="text-[11px] font-medium text-blue-600 lg:hidden">
+                Sinyotama Indonesia · Versi Vercel
+              </div>
             </div>
           </div>
 
